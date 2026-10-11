@@ -1,141 +1,324 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
+import { 
+  Server, 
+  AlertTriangle, 
+  CheckCircle2, 
+  ArrowRight, 
+  Layers, 
+  RefreshCw
+} from 'lucide-react';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
 import api from '../api/client';
+import { getSocket } from '../api/socket';
+import { useOrg } from '../context/OrgContext';
+import Layout from '../components/Layout';
 
-const Dashboard = () => {
-  const { user, logout } = useContext(AuthContext);
-  const navigate = useNavigate();
+export default function Dashboard() {
+  const { activeOrg, activeOrgId, organizations } = useOrg();
 
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [recentIncidents, setRecentIncidents] = useState([]);
 
-  const fetchSummary = async () => {
+  const fetchSummary = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
-      const res = await api.get('/dashboard/summary');
-      setSummary(res.data.summary);
+      const [sumRes, incRes] = await Promise.all([
+        api.get('/dashboard/summary'),
+        activeOrgId 
+          ? api.get(`/incidents?organizationId=${activeOrgId}&page=1&limit=5`).catch(() => ({ data: { incidents: [] } }))
+          : Promise.resolve({ data: { incidents: [] } })
+      ]);
+      setSummary(sumRes.data.summary);
+      setRecentIncidents(incRes.data.incidents || []);
     } catch (err) {
-      if (err.response?.status === 401) {
-        logout();
-        navigate('/login');
-      } else {
-        setError(err.response?.data?.message || 'Failed to load dashboard');
-      }
+      setError(err.response?.data?.message || 'Failed to load telemetry summary');
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeOrgId]);
 
   useEffect(() => {
     fetchSummary();
+  }, [fetchSummary]);
+
+  // Real-time incident updates
+  useEffect(() => {
+    const socket = getSocket();
+    if (socket) {
+      const onNewInc = (inc) => {
+        setRecentIncidents(prev => [inc, ...prev.slice(0, 4)]);
+      };
+      socket.on('new_incident', onNewInc);
+      return () => {
+        socket.off('new_incident', onNewInc);
+      };
+    }
   }, []);
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
+  const envData = summary?.environmentCounts ? [
+    { name: 'Production', count: summary.environmentCounts.production || 0, color: '#f97316' },
+    { name: 'Staging', count: summary.environmentCounts.staging || 0, color: '#a855f7' },
+    { name: 'Development', count: summary.environmentCounts.development || 0, color: '#38bdf8' }
+  ] : [];
+
+  const statusData = summary?.statusCounts ? [
+    { name: 'Healthy', count: summary.statusCounts.healthy || 0, color: '#10b981' },
+    { name: 'Degraded', count: summary.statusCounts.degraded || 0, color: '#f59e0b' },
+    { name: 'Down', count: summary.statusCounts.down || 0, color: '#ef4444' },
+    { name: 'Unknown', count: summary.statusCounts.unknown || 0, color: '#64748b' }
+  ] : [];
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
+    <Layout>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
           <div>
-            <h1 className="text-2xl font-bold text-blue-700">OpsMind Dashboard</h1>
-            <p className="text-sm text-gray-500">Welcome, {user?.name}</p>
+            <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
+              <span>Environment:</span>
+              <span className="font-semibold text-sky-400">{activeOrg ? activeOrg.name : 'All Workspaces'}</span>
+            </div>
+            <h1 className="text-2xl font-bold text-white tracking-tight">Operational Overview</h1>
+            <p className="text-sm text-slate-400 mt-1">
+              Real-time cross-service health, attention items, and active incident telemetry
+            </p>
           </div>
-          <div className="flex gap-4 items-center">
-            <button onClick={() => navigate('/organizations')} className="text-blue-600 hover:underline">
-              Manage Organizations
-            </button>
-            <button onClick={() => navigate('/github')} className="text-blue-600 hover:underline">
-              GitHub CI/CD
-            </button>
-            <button onClick={handleLogout} className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600 text-sm">
-              Logout
-            </button>
+
+          <button
+            onClick={fetchSummary}
+            className="self-start sm:self-auto px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh Telemetry</span>
+          </button>
+        </div>
+
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-4 rounded-xl text-xs flex items-center justify-between">
+            <span>{error}</span>
+            <button onClick={fetchSummary} className="underline font-semibold ml-4">Retry</button>
+          </div>
+        )}
+
+        {/* Top Summary Metrics */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 shadow-sm">
+            <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+              <span>Total Services</span>
+              <Server className="w-4 h-4 text-sky-400" />
+            </div>
+            <div className="text-3xl font-extrabold text-white">
+              {loading ? '—' : summary?.totalServices || 0}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-2">Monitored runtime endpoints</div>
+          </div>
+
+          <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 shadow-sm">
+            <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+              <span>Healthy Services</span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div className="text-3xl font-extrabold text-emerald-400">
+              {loading ? '—' : summary?.statusCounts?.healthy || 0}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-2">Operating within latency threshold</div>
+          </div>
+
+          <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 shadow-sm">
+            <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+              <span>Attention Required</span>
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+            </div>
+            <div className="text-3xl font-extrabold text-amber-400">
+              {loading ? '—' : summary?.attentionRequired?.length || 0}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-2">Degraded or down services</div>
+          </div>
+
+          <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 shadow-sm">
+            <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+              <span>Active Organizations</span>
+              <Layers className="w-4 h-4 text-indigo-400" />
+            </div>
+            <div className="text-3xl font-extrabold text-white">
+              {organizations.length}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-2">Multi-tenant domains</div>
           </div>
         </div>
 
-        {loading && <div className="text-gray-500">Loading dashboard...</div>}
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-600 p-4 rounded mb-6">
-            {error}
-            <button onClick={fetchSummary} className="ml-4 underline">Retry</button>
+        {/* Attention Required Services */}
+        <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+              <h2 className="text-sm font-semibold text-white">Attention Required Services</h2>
+            </div>
+            <Link to="/services" className="text-xs text-sky-400 hover:text-sky-300 font-medium flex items-center gap-1">
+              <span>View all services</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
-        )}
 
-        {!loading && !error && summary && (
-          <>
-            {/* Stat Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-              <div className="bg-white p-4 rounded shadow text-center">
-                <div className="text-sm text-gray-500 mb-1">Total Services</div>
-                <div className="text-3xl font-bold">{summary.totalServices}</div>
-              </div>
-              <div className="bg-white p-4 rounded shadow text-center">
-                <div className="text-sm text-gray-500 mb-1">Production</div>
-                <div className="text-3xl font-bold text-orange-600">{summary.environmentCounts?.production || 0}</div>
-              </div>
-              <div className="bg-white p-4 rounded shadow text-center">
-                <div className="text-sm text-gray-500 mb-1">Healthy</div>
-                <div className="text-3xl font-bold text-green-600">{summary.statusCounts?.healthy || 0}</div>
-              </div>
-              <div className="bg-white p-4 rounded shadow text-center">
-                <div className="text-sm text-gray-500 mb-1">Down</div>
-                <div className="text-3xl font-bold text-red-600">{summary.statusCounts?.down || 0}</div>
-              </div>
+          {loading ? (
+            <div className="py-6 text-center text-slate-500 text-xs">Loading status telemetry...</div>
+          ) : !summary?.attentionRequired || summary.attentionRequired.length === 0 ? (
+            <div className="py-8 text-center bg-slate-900/40 rounded-lg border border-slate-800/80">
+              <CheckCircle2 className="w-8 h-8 text-emerald-400/60 mx-auto mb-2" />
+              <p className="text-xs text-slate-300 font-medium">All systems nominal</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">No services currently reporting degraded or down status</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {summary.attentionRequired.map(svc => (
+                <div 
+                  key={svc._id}
+                  className="bg-red-500/5 border border-red-500/20 rounded-xl p-4 flex items-center justify-between"
+                >
+                  <div>
+                    <div className="font-semibold text-white text-sm">{svc.name}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">
+                      {svc.organization?.name} / {svc.project?.name}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      Heartbeat: {svc.lastHeartbeatAt ? new Date(svc.lastHeartbeatAt).toLocaleTimeString() : 'Never ingested'}
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <span className={`px-2.5 py-1 rounded text-xs font-bold uppercase ${
+                      svc.status === 'down' ? 'bg-red-500/20 text-red-300 border border-red-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                    }`}>
+                      {svc.status}
+                    </span>
+                    <div className="mt-2">
+                      <Link 
+                        to={`/logs?serviceId=${svc._id}`} 
+                        className="text-xs text-sky-400 hover:text-sky-300 font-medium"
+                      >
+                        Inspect logs →
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Charts & Recent Activity Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Status Breakdown Chart */}
+          <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 shadow-sm flex flex-col justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-white mb-1">Service Health Distribution</h2>
+              <p className="text-xs text-slate-400 mb-4">Active operational statuses across user projects</p>
             </div>
 
-            {/* Attention Required */}
-            <div className="bg-white rounded shadow p-6 mb-8">
-              <h2 className="text-lg font-semibold mb-4 text-red-700 border-b pb-2">Attention Required</h2>
-              {summary.attentionRequired.length === 0 ? (
-                <div className="text-gray-500 text-center py-4">No services currently reporting degraded or down status.</div>
+            <div className="h-48 w-full flex items-center justify-center">
+              {loading ? (
+                <div className="text-slate-500 text-xs">Loading chart...</div>
+              ) : statusData.every(d => d.count === 0) ? (
+                <div className="text-slate-600 text-xs">No service data registered</div>
               ) : (
-                <div className="flex flex-col gap-3">
-                  {summary.attentionRequired.map(svc => (
-                    <div key={svc._id} className="border border-red-200 bg-red-50 p-4 rounded flex justify-between items-center">
-                      <div>
-                        <div className="font-semibold text-lg">{svc.name}</div>
-                        <div className="text-sm text-gray-600">
-                          {svc.organization?.name} / {svc.project?.name}
-                        </div>
-                        <div className="text-xs text-gray-400 mt-1">
-                          Last heartbeat: {svc.lastHeartbeatAt ? new Date(svc.lastHeartbeatAt).toLocaleString() : 'Never'}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <span className={`inline-block px-2 py-1 rounded text-xs font-bold mb-2 ${svc.status === 'down' ? 'bg-red-200 text-red-800' : 'bg-yellow-200 text-yellow-800'}`}>
-                          {svc.status.toUpperCase()}
-                        </span>
-                        <div className="text-sm">
-                          <button onClick={() => navigate('/organizations')} className="text-blue-600 hover:underline">
-                            Investigate →
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={statusData}>
+                    <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#64748b" fontSize={11} tickLine={false} allowDecimals={false} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#0B0F19', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
+                      itemStyle={{ color: '#F8FAFC' }}
+                    />
+                    <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                      {statusData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
               )}
             </div>
+          </div>
 
-            {summary.totalServices === 0 && (
-              <div className="text-center bg-blue-50 p-6 rounded border border-blue-100">
-                <p className="mb-4">You don't have any services registered yet.</p>
-                <button onClick={() => navigate('/organizations')} className="bg-blue-600 text-white px-4 py-2 rounded">
-                  Go to Organizations to get started
-                </button>
+          {/* Environment Breakdown Chart */}
+          <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 shadow-sm flex flex-col justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-white mb-1">Environment Breakdown</h2>
+              <p className="text-xs text-slate-400 mb-4">Services distributed by lifecycle tier</p>
+            </div>
+
+            <div className="h-48 w-full flex items-center justify-center">
+              {loading ? (
+                <div className="text-slate-500 text-xs">Loading chart...</div>
+              ) : envData.every(d => d.count === 0) ? (
+                <div className="text-slate-600 text-xs">No environment telemetry</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={envData} layout="vertical">
+                    <XAxis type="number" stroke="#64748b" fontSize={11} tickLine={false} allowDecimals={false} />
+                    <YAxis dataKey="name" type="category" stroke="#64748b" fontSize={11} tickLine={false} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#0B0F19', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
+                      itemStyle={{ color: '#F8FAFC' }}
+                    />
+                    <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                      {envData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+
+          {/* Recent Active Incidents */}
+          <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <h2 className="text-sm font-semibold text-white">Recent Incidents</h2>
+                <Link to="/incidents" className="text-[11px] text-sky-400 hover:text-sky-300 font-medium">
+                  View all →
+                </Link>
               </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
+              <p className="text-xs text-slate-400 mb-4">Latest detected failures in active organization</p>
+            </div>
 
-export default Dashboard;
+            <div className="space-y-2 flex-1">
+              {recentIncidents.length === 0 ? (
+                <div className="py-10 text-center text-slate-600 text-xs">
+                  No active incidents recorded for this workspace.
+                </div>
+              ) : (
+                recentIncidents.slice(0, 4).map(inc => (
+                  <Link
+                    key={inc._id}
+                    to={`/incidents?id=${inc._id}`}
+                    className="block p-2.5 rounded-lg bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="font-semibold text-xs text-slate-200 truncate">{inc.title}</div>
+                      <span className={`text-[10px] uppercase font-bold px-1.5 py-0.2 rounded shrink-0 ${
+                        inc.severity === 'critical' ? 'text-red-400' : 'text-amber-400'
+                      }`}>
+                        {inc.severity}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-1 flex justify-between">
+                      <span>{inc.service?.name || inc.source}</span>
+                      <span>{new Date(inc.lastSeenAt || inc.createdAt).toLocaleTimeString()}</span>
+                    </div>
+                  </Link>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </Layout>
+  );
+}

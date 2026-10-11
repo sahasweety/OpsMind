@@ -1,272 +1,210 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { 
+  Building2, 
+  Plus, 
+  Trash2, 
+  Shield, 
+  Users, 
+  Calendar, 
+  Layers, 
+  CheckCircle2, 
+  AlertCircle,
+  ExternalLink
+} from 'lucide-react';
 import api from '../api/client';
-import ServicePanel from '../components/ServicePanel';
-import IncidentPanel from '../components/IncidentPanel';
-import WebhookPanel from '../components/WebhookPanel';
+import { useAuth } from '../context/AuthContext';
+import { useOrg } from '../context/OrgContext';
+import Layout from '../components/Layout';
 
-// ─── Service Panel wrapper inside Project Panel ─────────────────────────────
-
-function ProjectPanel({ org, onBack }) {
-  const [projects, setProjects] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [newProjectName, setNewProjectName] = useState('');
-  const [newProjectDesc, setNewProjectDesc] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [formError, setFormError] = useState('');
-  const [selectedProject, setSelectedProject] = useState(null);
-  const [viewingIncidents, setViewingIncidents] = useState(false);
-  const [viewingWebhooks, setViewingWebhooks] = useState(false);
-
-  // Determine current user's role in this org.
-  // user._id is a MongoDB ObjectId serialised as a string by the server.
-  // m.user may be a populated object { _id, name, email } or a raw ObjectId,
-  // depending on which API endpoint was used to load the org list.
-  const { user } = useContext(AuthContext);
-  const membership = org.members?.find(m => {
-    const memberId = (m.user?._id ?? m.user)?.toString();
-    const currentId = user?._id?.toString();
-    return memberId && currentId && memberId === currentId;
-  });
-  // Never grant permissions silently; explicit null means "no membership found".
-  const orgRole = membership?.role ?? null;
-  if (!membership && user) {
-    console.warn('[ProjectPanel] Could not resolve org membership for user', user._id, '— canWrite will be false');
-  }
-
-  const fetchProjects = async () => {
-    try {
-      setLoading(true);
-      const res = await api.get(`/projects?organizationId=${org._id}`);
-      setProjects(res.data.projects);
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to load projects');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchProjects(); }, [org._id]);
-
-  const handleCreateProject = async (e) => {
-    e.preventDefault();
-    setFormError('');
-    if (!newProjectName.trim()) { setFormError('Project name is required'); return; }
-    try {
-      setCreating(true);
-      await api.post('/projects', {
-        name: newProjectName.trim(),
-        description: newProjectDesc.trim(),
-        organizationId: org._id
-      });
-      setNewProjectName('');
-      setNewProjectDesc('');
-      fetchProjects();
-    } catch (err) {
-      setFormError(err.response?.data?.message || 'Failed to create project');
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  if (viewingIncidents) {
-    return <IncidentPanel org={org} onBack={() => setViewingIncidents(false)} />;
-  }
-
-  if (viewingWebhooks) {
-    return <WebhookPanel org={org} orgRole={orgRole} onBack={() => setViewingWebhooks(false)} />;
-  }
-
-  if (selectedProject) {
-    return (
-      <div>
-        <button onClick={() => setSelectedProject(null)} className="mb-4 text-blue-600 hover:underline text-sm">
-          ← Back to projects
-        </button>
-        <ServicePanel
-          project={selectedProject}
-          orgRole={orgRole}
-          onBack={() => setSelectedProject(null)}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <button onClick={onBack} className="mb-4 text-blue-600 hover:underline text-sm">
-        ← Back to Organizations
-      </button>
-      <div className="flex justify-between items-center mb-4">
-        <div>
-          <h2 className="text-xl font-semibold mb-1">{org.name}</h2>
-          <p className="text-sm text-gray-500">Slug: {org.slug}</p>
-        </div>
-        <div className="flex gap-2">
-          {(orgRole === 'owner' || orgRole === 'admin') && (
-            <button
-              onClick={() => setViewingWebhooks(true)}
-              className="bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1.5 rounded font-medium text-sm hover:bg-blue-100 transition"
-            >
-              Webhooks
-            </button>
-          )}
-          <button onClick={() => setViewingIncidents(true)} className="bg-red-100 text-red-800 px-4 py-2 rounded font-bold hover:bg-red-200 text-sm">
-            View Incidents
-          </button>
-        </div>
-      </div>
-
-      <div className="bg-gray-50 border rounded p-4 mb-6">
-        <h3 className="font-medium mb-2">New Project</h3>
-        {formError && <div className="text-red-600 text-sm mb-2">{formError}</div>}
-        <form onSubmit={handleCreateProject} className="flex flex-col gap-2">
-          <input type="text" placeholder="Project name" value={newProjectName}
-            onChange={e => setNewProjectName(e.target.value)} className="border p-2 rounded text-sm" />
-          <input type="text" placeholder="Description (optional)" value={newProjectDesc}
-            onChange={e => setNewProjectDesc(e.target.value)} className="border p-2 rounded text-sm" />
-          <button type="submit" disabled={creating}
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm disabled:opacity-50">
-            {creating ? 'Creating...' : 'Create Project'}
-          </button>
-        </form>
-      </div>
-
-      <h3 className="font-medium mb-2">Projects</h3>
-      {loading && <div className="text-gray-500 text-sm">Loading projects...</div>}
-      {error && <div className="text-red-600 text-sm">{error}</div>}
-      {!loading && !error && projects.length === 0 && (
-        <div className="text-gray-400 text-sm py-4 text-center">No projects yet. Create one above.</div>
-      )}
-      <div className="flex flex-col gap-2">
-        {projects.map(p => (
-          <button key={p._id} onClick={() => setSelectedProject(p)}
-            className="text-left border rounded p-3 hover:bg-blue-50 transition">
-            <div className="font-medium">{p.name}</div>
-            {p.description && <div className="text-sm text-gray-500 mt-1">{p.description}</div>}
-            <div className="text-xs text-gray-400 mt-1">Click to view services →</div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Main Organizations Page ────────────────────────────────────────────────
-
-const Organizations = () => {
-  const { user, logout } = useContext(AuthContext);
+export default function Organizations() {
+  const { user } = useAuth();
+  const { organizations, activeOrgId, selectOrg, fetchOrganizations, loading } = useOrg();
   const navigate = useNavigate();
 
-  const [orgs, setOrgs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [newOrgName, setNewOrgName] = useState('');
   const [creating, setCreating] = useState(false);
-  const [formError, setFormError] = useState('');
-  const [selectedOrg, setSelectedOrg] = useState(null);
-
-  const fetchOrgs = async () => {
-    try {
-      setLoading(true);
-      const res = await api.get('/organizations');
-      setOrgs(res.data.organizations);
-    } catch (err) {
-      if (err.response?.status === 401) { logout(); navigate('/login'); }
-      else setError(err.response?.data?.message || 'Failed to load organizations');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchOrgs(); }, []);
+  const [name, setName] = useState('');
+  const [createError, setCreateError] = useState('');
+  const [deletingId, setDeletingId] = useState(null);
 
   const handleCreateOrg = async (e) => {
     e.preventDefault();
-    setFormError('');
-    if (!newOrgName.trim()) { setFormError('Organization name is required'); return; }
+    setCreateError('');
+    if (!name.trim()) {
+      setCreateError('Organization name is required');
+      return;
+    }
+    setCreating(true);
     try {
-      setCreating(true);
-      await api.post('/organizations', { name: newOrgName.trim() });
-      setNewOrgName('');
-      fetchOrgs();
+      const res = await api.post('/organizations', { name: name.trim() });
+      setName('');
+      await fetchOrganizations();
+      if (res.data.organization) {
+        selectOrg(res.data.organization._id);
+      }
     } catch (err) {
-      setFormError(err.response?.data?.message || 'Failed to create organization');
+      setCreateError(err.response?.data?.message || 'Failed to create organization');
     } finally {
       setCreating(false);
     }
   };
 
-  const handleLogout = () => { logout(); navigate('/login'); };
-
-  if (selectedOrg) {
-    return (
-      <div className="min-h-screen bg-gray-100 p-6">
-        <div className="max-w-2xl mx-auto bg-white rounded shadow p-6">
-          <ProjectPanel org={selectedOrg} onBack={() => setSelectedOrg(null)} />
-        </div>
-      </div>
-    );
-  }
+  const handleDeleteOrg = async (orgId, orgName) => {
+    if (!window.confirm(`Are you sure you want to permanently delete "${orgName}"? All child projects, services, and webhooks will be deleted.`)) {
+      return;
+    }
+    setDeletingId(orgId);
+    try {
+      await api.delete(`/organizations/${orgId}`);
+      await fetchOrganizations();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to delete organization');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
-      <div className="max-w-2xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
+    <Layout>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
           <div>
-            <h1 className="text-2xl font-bold text-blue-700">OpsMind</h1>
-            <p className="text-sm text-gray-500">Welcome, {user?.name}</p>
-          </div>
-          <div className="flex gap-4 items-center">
-            <button onClick={() => navigate('/')} className="text-blue-600 hover:underline text-sm">
-              Dashboard
-            </button>
-            <button onClick={() => navigate('/github')} className="text-blue-600 hover:underline text-sm">
-              GitHub CI/CD
-            </button>
-
-            <button onClick={handleLogout}
-              className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600 text-sm">
-              Logout
-            </button>
+            <h1 className="text-2xl font-bold text-white tracking-tight">Organizations</h1>
+            <p className="text-sm text-slate-400 mt-1">
+              Manage your DevOps workspaces, memberships, and multi-tenant scopes
+            </p>
           </div>
         </div>
 
-        <div className="bg-white rounded shadow p-4 mb-6">
-          <h2 className="font-semibold mb-2">New Organization</h2>
-          {formError && <div className="text-red-600 text-sm mb-2">{formError}</div>}
-          <form onSubmit={handleCreateOrg} className="flex gap-2">
-            <input type="text" placeholder="Organization name" value={newOrgName}
-              onChange={e => setNewOrgName(e.target.value)} className="flex-1 border p-2 rounded text-sm" />
-            <button type="submit" disabled={creating}
-              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm disabled:opacity-50">
-              {creating ? 'Creating...' : 'Create'}
+        {/* Create Organization Card */}
+        <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 shadow-sm">
+          <h2 className="text-sm font-semibold text-white mb-1">Create New Organization</h2>
+          <p className="text-xs text-slate-400 mb-4">You will automatically become the owner with full administrative rights</p>
+
+          {createError && (
+            <div className="mb-4 bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-lg text-xs">
+              {createError}
+            </div>
+          )}
+
+          <form onSubmit={handleCreateOrg} className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="e.g. Acme Cloud Platform"
+              required
+              className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
+            />
+            <button
+              type="submit"
+              disabled={creating}
+              className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50 transition"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{creating ? 'Creating...' : 'Create Organization'}</span>
             </button>
           </form>
         </div>
 
-        <div className="bg-white rounded shadow p-4">
-          <h2 className="font-semibold mb-3">My Organizations</h2>
-          {loading && <div className="text-gray-500 text-sm">Loading...</div>}
-          {error && <div className="text-red-600 text-sm">{error}</div>}
-          {!loading && !error && orgs.length === 0 && (
-            <div className="text-gray-400 text-sm py-4 text-center">No organizations yet. Create one above.</div>
+        {/* Organizations List */}
+        <div>
+          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3">
+            Your Organizations ({organizations.length})
+          </h2>
+
+          {loading ? (
+            <div className="text-slate-500 text-sm py-8 text-center bg-[#111827] rounded-xl border border-slate-800">
+              Loading organizations...
+            </div>
+          ) : organizations.length === 0 ? (
+            <div className="text-center py-12 bg-[#111827] rounded-xl border border-slate-800">
+              <Building2 className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+              <p className="text-slate-300 font-medium text-sm">No organizations found</p>
+              <p className="text-slate-500 text-xs mt-1">Create an organization above to get started with monitoring</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {organizations.map(org => {
+                const isSelected = org._id === activeOrgId;
+                const memberRecord = org.members?.find(m => {
+                  const mId = (m.user?._id ?? m.user)?.toString();
+                  return mId && user?._id && mId === user._id.toString();
+                });
+                const role = memberRecord?.role || 'member';
+                const isOwner = role === 'owner';
+
+                return (
+                  <div
+                    key={org._id}
+                    className={`bg-[#111827] rounded-xl border p-5 transition flex flex-col justify-between ${
+                      isSelected ? 'border-sky-500/80 ring-1 ring-sky-500/30' : 'border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <h3 className="font-semibold text-white text-base truncate" title={org.name}>
+                          {org.name}
+                        </h3>
+                        <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border shrink-0 ${
+                          role === 'owner' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                          role === 'admin' ? 'bg-sky-500/10 text-sky-400 border-sky-500/20' :
+                          'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}>
+                          {role}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5 text-xs text-slate-400 mb-4">
+                        <div className="font-mono text-[11px] text-slate-500">slug: {org.slug}</div>
+                        <div className="flex items-center gap-1.5">
+                          <Users className="w-3.5 h-3.5 text-slate-500" />
+                          <span>{org.members?.length || 1} team member{org.members?.length === 1 ? '' : 's'}</span>
+                        </div>
+                        {org.createdAt && (
+                          <div className="flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Created {new Date(org.createdAt).toLocaleDateString()}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                      <button
+                        onClick={() => {
+                          selectOrg(org._id);
+                          navigate('/projects');
+                        }}
+                        className={`text-xs px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 ${
+                          isSelected 
+                            ? 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/30' 
+                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        }`}
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>{isSelected ? 'Active (Open)' : 'Set Active'}</span>
+                      </button>
+
+                      {isOwner && (
+                        <button
+                          disabled={deletingId === org._id}
+                          onClick={() => handleDeleteOrg(org._id, org.name)}
+                          className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                          title="Delete Organization"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
-          <div className="flex flex-col gap-2">
-            {orgs.map(org => (
-              <button key={org._id} onClick={() => setSelectedOrg(org)}
-                className="text-left border rounded p-3 hover:bg-blue-50 transition">
-                <div className="font-medium">{org.name}</div>
-                <div className="text-xs text-gray-400">/{org.slug}</div>
-              </button>
-            ))}
-          </div>
         </div>
       </div>
-    </div>
+    </Layout>
   );
-};
-
-export default Organizations;
+}

@@ -2,7 +2,9 @@ import { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, LoaderCircle, Info, X, ShieldCheck, Gauge } from 'lucide-react';
 import { AuthContext } from '../context/AuthContext';
+import { useOrg } from '../context/OrgContext';
 import api from '../api/client';
+import Layout from '../components/Layout';
 import RepoHeader from '../components/github/RepoHeader';
 import WorkflowRunsPanel from '../components/github/WorkflowRunsPanel';
 import CommitsPanel from '../components/github/CommitsPanel';
@@ -22,6 +24,7 @@ const Skeletons = ({ count = 4, label }) => (
 
 export default function GitHubIntegration() {
     const { user, logout } = useContext(AuthContext);
+    const { activeOrgId } = useOrg();
     const navigate = useNavigate();
 
     // Organizations
@@ -309,19 +312,17 @@ export default function GitHubIntegration() {
     ];
 
     return (
-        <div className="gh-page">
-            <div className="gh-container">
-                <header className="gh-topbar">
-                    <div>
-                        <h1>GitHub CI/CD</h1>
-                        <p className="gh-muted">Monitor repository activity and GitHub Actions workflow runs.</p>
+        <Layout>
+            <div className="gh-page !bg-transparent !p-0">
+                <div className="gh-container !max-w-none">
+                    <div className="pb-5 mb-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                            <h1 className="text-2xl font-bold text-white tracking-tight">GitHub CI/CD Integration</h1>
+                            <p className="text-sm text-slate-400 mt-1">
+                                Monitor repository commit history and trigger automated incidents from failed workflow runs
+                            </p>
+                        </div>
                     </div>
-                    <nav className="gh-topbar__nav" aria-label="Primary">
-                        <button type="button" className="gh-btn gh-btn--sm" onClick={() => navigate('/')}>Dashboard</button>
-                        <button type="button" className="gh-btn gh-btn--sm" onClick={() => navigate('/organizations')}>Organizations</button>
-                        <button type="button" className="gh-btn gh-btn--sm" onClick={() => { logout(); navigate('/login'); }}>Logout</button>
-                    </nav>
-                </header>
 
                 {orgsState.loading && <Skeletons count={3} label="Loading organizations" />}
                 {orgsState.error && <ErrorNotice error={orgsState.error} onRetry={loadOrgs} />}
@@ -519,5 +520,6 @@ export default function GitHubIntegration() {
                 )}
             </div>
         </div>
+        </Layout>
     );
 }
