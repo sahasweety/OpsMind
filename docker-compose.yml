@@ -1,0 +1,25 @@
+services:
+  server:
+    build: ./server
+    env_file:
+      - ./server/.env
+
+  client:
+    build: ./client
+    ports:
+      - "5173:80"
+    depends_on:
+      - server
+
+  simulator:
+    build: ./simulator
+    ports:
+      - "5001:5001"
+    depends_on:
+      - server
+    env_file:
+      - ./simulator/.env          # gitignored — never committed or baked into image
+    environment:
+      # Static values that are safe to hardcode — override anything in env_file
+      - PORT=5001
+      - INGEST_URL=http://server:5000/api/ingest
