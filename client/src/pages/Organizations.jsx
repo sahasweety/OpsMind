@@ -19,13 +19,27 @@ import Layout from '../components/Layout';
 
 export default function Organizations() {
   const { user } = useAuth();
-  const { organizations, activeOrgId, selectOrg, fetchOrganizations, loading } = useOrg();
+  const { 
+    organizations, 
+    activeOrgId, 
+    selectOrg, 
+    addOrganization, 
+    fetchOrganizations, 
+    loading, 
+    error: orgError 
+  } = useOrg();
   const navigate = useNavigate();
 
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const [createError, setCreateError] = useState('');
   const [deletingId, setDeletingId] = useState(null);
+
+  useEffect(() => {
+    if (user) {
+      fetchOrganizations();
+    }
+  }, [user, fetchOrganizations]);
 
   const handleCreateOrg = async (e) => {
     e.preventDefault();
@@ -37,10 +51,23 @@ export default function Organizations() {
     setCreating(true);
     try {
       const res = await api.post('/organizations', { name: name.trim() });
+      const createdOrg = res.data.organization;
       setName('');
+
+      // Immediately add the new organization to state so it appears without a reload
+      if (createdOrg) {
+        if (addOrganization) {
+          addOrganization(createdOrg);
+        } else {
+          selectOrg(createdOrg._id);
+        }
+      }
+
+      // Re-fetch to ensure complete server-side populated state (members, owner)
       await fetchOrganizations();
-      if (res.data.organization) {
-        selectOrg(res.data.organization._id);
+
+      if (createdOrg) {
+        selectOrg(createdOrg._id);
       }
     } catch (err) {
       setCreateError(err.response?.data?.message || 'Failed to create organization');
@@ -76,6 +103,23 @@ export default function Organizations() {
             </p>
           </div>
         </div>
+
+        {/* Global Organizations Load Error Banner */}
+        {orgError && (
+          <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3.5 rounded-xl text-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{orgError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => fetchOrganizations()}
+              className="text-xs text-sky-400 hover:text-sky-300 font-medium underline ml-2 cursor-pointer"
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
         {/* Create Organization Card */}
         <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 shadow-sm">

@@ -1,6 +1,13 @@
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace('/api', '') : '/';
+const resolveSocketUrl = () => {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (!envUrl) return '/';
+  const trimmed = envUrl.trim().replace(/\/+$/, '');
+  return trimmed.replace(/\/api$/, '') || '/';
+};
+
+const SOCKET_URL = resolveSocketUrl();
 
 let socket = null;
 
